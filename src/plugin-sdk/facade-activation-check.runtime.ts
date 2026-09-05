@@ -19,6 +19,8 @@ import {
 import { isPluginEnabledByDefaultForPlatform } from "../plugins/default-enablement.js";
 import type { PluginManifestRecord } from "../plugins/manifest-registry.js";
 import { resolvePluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.js";
+import { getPluginRegistryState } from "../plugins/runtime-state.js";
+import { getPluginRuntimeGatewayRequestScope } from "../plugins/runtime/gateway-request-scope.js";
 import { parseJsonWithJson5Fallback } from "../utils/parse-json-compat.js";
 import { ALWAYS_ALLOWED_RUNTIME_DIR_NAMES } from "./facade-activation-contract.js";
 import {
@@ -176,6 +178,18 @@ export function resolveBundledPluginPublicSurfaceAccess(params: {
     return {
       allowed: false,
       reason: `no bundled plugin manifest found for ${params.dirName}`,
+    };
+  }
+  const state = getPluginRegistryState();
+  const runtimeRegistry =
+    getPluginRuntimeGatewayRequestScope()?.pluginRegistry ??
+    (state?.runtimeSubagentMode === "gateway-bindable" ? state.activeRegistry : undefined);
+  if (runtimeRegistry) {
+    const record = runtimeRegistry.plugins.find((entry) => entry.id === manifestRecord.id);
+    return {
+      allowed: record?.status === "loaded",
+      pluginId: manifestRecord.id,
+      ...(record?.status === "loaded" ? {} : { reason: "plugin runtime is not active" }),
     };
   }
   const { config, normalizedPluginsConfig, activationSource, autoEnabledReasons } =

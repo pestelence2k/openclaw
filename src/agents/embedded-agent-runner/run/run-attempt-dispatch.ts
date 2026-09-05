@@ -7,6 +7,7 @@ import { resolveDelegationCapability } from "../../delegation-capability.js";
 import type { AgentHarnessRuntimeArtifactBinding } from "../../harness/runtime-artifact.types.js";
 import { appendIncognitoSystemPrompt } from "../../incognito-system-prompt.js";
 import { applyAuthHeaderOverride, applyLocalNoAuthHeaderOverride } from "../../model-auth.js";
+import { captureAgentPluginRuntimeRefresh } from "../../plugin-runtime-refresh.js";
 import { appendProgressCardSystemPrompt } from "../../progress-card-system-prompt.js";
 import type { AgentRunSessionTarget } from "../../run-session-target.js";
 import type { AgentRuntimePlan } from "../../runtime-plan/types.js";
@@ -251,6 +252,8 @@ export async function dispatchEmbeddedRunAttempt(input: {
     },
   });
   const attemptParams: EmbeddedRunAttemptInternalParams = {
+    pluginRuntimeRefreshPending: captureAgentPluginRuntimeRefresh().isPending,
+    pluginRuntimeRefreshMessages: params.pluginRuntimeRefreshMessages,
     permissionChange: input.permissionChange,
     admittedRunContext: params.admittedRunContext,
     startedAtMs: input.runStartedAtMs,

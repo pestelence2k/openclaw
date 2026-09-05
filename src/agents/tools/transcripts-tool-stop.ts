@@ -38,6 +38,7 @@ export async function stopTranscripts(params: {
   store: TranscriptsStore;
   rawParams: Record<string, unknown>;
   lifecycleToken?: symbol;
+  requireProviderStop?: boolean;
 }) {
   let selection: Awaited<ReturnType<typeof resolveTranscriptToolSession>>;
   if (params.lifecycleToken) {
@@ -78,6 +79,9 @@ export async function stopTranscripts(params: {
     );
   }
   if (selectedActive?.stopping) {
+    if (params.requireProviderStop) {
+      throw new Error(`Transcripts session stop still in progress: ${sessionId}`);
+    }
     return toolText(`Transcripts session stop already in progress: ${sessionId}`, {
       sessionId,
       selector,
@@ -92,7 +96,7 @@ export async function stopTranscripts(params: {
     let providerStopError: string | undefined;
     if (selectedActive && selectedActive.phase !== "terminal") {
       const provider = resolveSourceProvider(selectedActive.providerId, params.ctx);
-      if (selectedActive.cleanupPending) {
+      if (selectedActive.cleanupPending || params.requireProviderStop) {
         providerStopError = await stopPendingTranscriptCapture({
           ctx: params.ctx,
           provider,
@@ -100,6 +104,8 @@ export async function stopTranscripts(params: {
           reason: "tool-stop",
         });
         if (providerStopError) {
+          // Replacement retains this owner until the producer confirms cleanup.
+          selectedActive.cleanupPending = true;
           throw new Error(`transcripts provider cleanup failed: ${providerStopError}`);
         }
       } else if (provider?.stop) {

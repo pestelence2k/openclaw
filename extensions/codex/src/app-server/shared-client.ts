@@ -134,9 +134,8 @@ type CodexAppServerSpawnIdentity = Omit<
   "clientId" | "serverVersion" | "userAgent"
 >;
 
-// Symbol.for shares one client table across duplicate module copies (dist +
-// src bundles in one process). Plugin updates restart the gateway, so every
-// copy writing this state runs the same code and the shape never migrates.
+// Share across source/dist module copies and plugin generations so reloading
+// the plugin preserves live native clients and their leases.
 const SHARED_CODEX_APP_SERVER_CLIENT_STATE = Symbol.for("openclaw.codexAppServerClientState");
 const SHARED_CODEX_APP_SERVER_CLIENT_DISPOSER = Symbol.for("openclaw.codexAppServerClientDisposer");
 const createStartupLifetime = (): CodexAppServerStartupLifetime => ({

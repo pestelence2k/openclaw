@@ -61,7 +61,9 @@ export function startManagedGatewayConfigReloader(
       stop: async () => {
         stopped = true;
       },
-      notifyPluginMetadataChanged: () => {},
+      applyPluginLifecycleChange: async () => {
+        throw new Error("Plugin lifecycle is unavailable in a minimal Gateway.");
+      },
       isConfigReloadSettled: () => !stopped,
     };
   }
@@ -513,9 +515,12 @@ export function startManagedGatewayConfigReloader(
       await configReloader.stop();
     },
     hotReloadStatus: configReloader.hotReloadStatus,
-    notifyPluginMetadataChanged: configReloader.notifyPluginMetadataChanged,
+    applyPluginLifecycleChange: configReloader.applyPluginLifecycleChange,
     // Equal config revisions can still owe a plugin/runtime restart.
     isConfigReloadSettled: () =>
-      !stopped && !hasConfigCandidatePending() && !hasOutstandingGatewayRestart(),
+      !stopped &&
+      !configReloader.isReloading() &&
+      !hasConfigCandidatePending() &&
+      !hasOutstandingGatewayRestart(),
   };
 }

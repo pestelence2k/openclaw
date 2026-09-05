@@ -4,7 +4,7 @@ import {
   setRuntimeConfigSnapshot,
 } from "../config/runtime-snapshot.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { installTemporaryCurrentPluginMetadataSnapshot } from "../plugins/current-plugin-metadata-snapshot.js";
+import { withPluginMetadataSnapshotScope } from "../plugins/current-plugin-metadata-snapshot.js";
 import { createPluginMetadataSnapshotFixture } from "../plugins/plugin-metadata.test-support.js";
 import {
   isSystemAgentSensitiveConfigPathEmbedding,
@@ -218,23 +218,21 @@ describe("redactSystemAgentConfig", () => {
       plugins: { entries: { plus: { enabled: false }, core: { enabled: true } } },
       channels: { proofchat: { core: "synthetic-core" } },
     };
-    const lease = installTemporaryCurrentPluginMetadataSnapshot(snapshot, {
-      config: preferred,
-      compatibleConfigs: [preferred, fallback],
-    });
-    try {
-      for (const [config, owner] of [
-        [preferred, "plus"],
-        [fallback, "core"],
-        [preferred, "plus"],
-      ] as const) {
-        expect(redactSystemAgentConfig(config, { config })).toMatchObject({
-          channels: { proofchat: { [owner]: "<redacted>" } },
-        });
-      }
-    } finally {
-      lease.release();
-    }
+    withPluginMetadataSnapshotScope(
+      snapshot,
+      () => {
+        for (const [config, owner] of [
+          [preferred, "plus"],
+          [fallback, "core"],
+          [preferred, "plus"],
+        ] as const) {
+          expect(redactSystemAgentConfig(config, { config })).toMatchObject({
+            channels: { proofchat: { [owner]: "<redacted>" } },
+          });
+        }
+      },
+      { config: preferred, compatibleConfigs: [preferred, fallback] },
+    );
   });
 
   it("fails closed for dynamic owner secrets when the exact config is invalid", () => {

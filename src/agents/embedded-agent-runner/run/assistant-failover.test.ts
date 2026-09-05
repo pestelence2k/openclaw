@@ -6,7 +6,7 @@ import { buildAgentRunTerminalOutcomeFromLifecycleEvent } from "../../agent-run-
 import { formatBillingErrorMessage } from "../../embedded-agent-helpers.js";
 import { FailoverError } from "../../failover-error.js";
 import { resolveAgentRunErrorLifecycleFields } from "../../run-termination.js";
-import { handleAssistantFailover, isShortWindowRateLimitMessage } from "./assistant-failover.js";
+import { handleAssistantFailover } from "./assistant-failover.js";
 import { resolveEmbeddedRunAttemptTerminalState } from "./terminal-outcome.js";
 
 type Params = Parameters<typeof handleAssistantFailover>[0];
@@ -49,7 +49,6 @@ function makeParams(overrides: Partial<Params> = {}): Params {
     warn: vi.fn(),
     maybeMarkAuthProfileFailure: vi.fn(async () => {}),
     getTransientRetryCount: () => 0,
-    maybeRetryTransient: vi.fn(async () => false),
     advanceAuthProfile: vi.fn(async () => false),
     advanceRateLimitAuthProfile: vi.fn(async () => false),
   };
@@ -173,335 +172,20 @@ describe("handleAssistantFailover", () => {
       expect(events).toEqual(["advance", "mark-start", "mark-finish"]);
     });
 
-    it("retries the same model before spending a rate-limit profile rotation", async () => {
-      const maybeRetryTransient = vi.fn(async () => true);
+    it("rotates the rate-limited profile after transient recovery is exhausted", async () => {
       const advanceRateLimitAuthProfile = vi.fn(async () => true);
-
       const outcome = await handleAssistantFailover(
         makeParams({
           initialDecision: { action: "rotate_profile", reason: "rate_limit" },
           failoverReason: "rate_limit",
           billingFailure: false,
           rateLimitFailure: true,
-          lastAssistant: {
-            errorMessage: "HTTP 429 Too Many Requests: requests per minute exceeded",
-          } as Params["lastAssistant"],
-          maybeRetryTransient,
+          getTransientRetryCount: () => 8,
           advanceRateLimitAuthProfile,
         }),
       );
 
       expect(outcome.action).toBe("retry");
-      if (outcome.action !== "retry") {
-        return;
-      }
-      expect(outcome.retryKind).toBe("same_model_transient");
-      expect(maybeRetryTransient).toHaveBeenCalledTimes(1);
-      expect(advanceRateLimitAuthProfile).not.toHaveBeenCalled();
-    });
-
-    it("rotates when the rate-limit controller denies a same-model retry", async () => {
-      const maybeRetryTransient = vi.fn(async () => false);
-      const advanceRateLimitAuthProfile = vi.fn(async () => true);
-
-      const outcome = await handleAssistantFailover(
-        makeParams({
-          initialDecision: { action: "rotate_profile", reason: "rate_limit" },
-          failoverReason: "rate_limit",
-          billingFailure: false,
-          rateLimitFailure: true,
-          lastAssistant: {
-            errorMessage: "HTTP 429 Too Many Requests: requests per minute exceeded",
-          } as Params["lastAssistant"],
-          maybeRetryTransient,
-          advanceRateLimitAuthProfile,
-        }),
-      );
-
-      expect(outcome.action).toBe("retry");
-      if (outcome.action !== "retry") {
-        return;
-      }
-      expect(outcome.retryKind).toBe("profile_rotation");
-      expect(maybeRetryTransient).toHaveBeenCalledTimes(1);
-      expect(advanceRateLimitAuthProfile).toHaveBeenCalledTimes(1);
-    });
-
-    it("does not spend same-model retry budget on quota-style rate limits", async () => {
-      const maybeRetryTransient = vi.fn(async () => true);
-      const advanceRateLimitAuthProfile = vi.fn(async () => true);
-
-      const outcome = await handleAssistantFailover(
-        makeParams({
-          initialDecision: { action: "rotate_profile", reason: "rate_limit" },
-          failoverReason: "rate_limit",
-          billingFailure: false,
-          rateLimitFailure: true,
-          lastAssistant: {
-            errorMessage:
-              "You exceeded your current quota, please check your plan and billing details.",
-          } as Params["lastAssistant"],
-          maybeRetryTransient,
-          advanceRateLimitAuthProfile,
-        }),
-      );
-
-      expect(outcome.action).toBe("retry");
-      if (outcome.action !== "retry") {
-        return;
-      }
-      expect(outcome.retryKind).toBe("profile_rotation");
-      expect(maybeRetryTransient).not.toHaveBeenCalled();
-      expect(advanceRateLimitAuthProfile).toHaveBeenCalledTimes(1);
-    });
-
-    it("does not treat bare 429 quota_exceeded as a short-window throttle", async () => {
-      const maybeRetryTransient = vi.fn(async () => true);
-      const advanceRateLimitAuthProfile = vi.fn(async () => true);
-
-      const outcome = await handleAssistantFailover(
-        makeParams({
-          initialDecision: { action: "rotate_profile", reason: "rate_limit" },
-          failoverReason: "rate_limit",
-          billingFailure: false,
-          rateLimitFailure: true,
-          lastAssistant: {
-            errorMessage: "Provider API error (429): Quota exceeded [code=quota_exceeded]",
-          } as Params["lastAssistant"],
-          maybeRetryTransient,
-          advanceRateLimitAuthProfile,
-        }),
-      );
-
-      expect(outcome.action).toBe("retry");
-      if (outcome.action !== "retry") {
-        return;
-      }
-      expect(outcome.retryKind).toBe("profile_rotation");
-      expect(maybeRetryTransient).not.toHaveBeenCalled();
-      expect(advanceRateLimitAuthProfile).toHaveBeenCalledTimes(1);
-    });
-
-    it("does not treat generic rate-limit text as a short-window throttle", async () => {
-      const maybeRetryTransient = vi.fn(async () => true);
-      const advanceRateLimitAuthProfile = vi.fn(async () => true);
-
-      const outcome = await handleAssistantFailover(
-        makeParams({
-          initialDecision: { action: "rotate_profile", reason: "rate_limit" },
-          failoverReason: "rate_limit",
-          billingFailure: false,
-          rateLimitFailure: true,
-          lastAssistant: {
-            errorMessage: "rate limit exceeded",
-          } as Params["lastAssistant"],
-          maybeRetryTransient,
-          advanceRateLimitAuthProfile,
-        }),
-      );
-
-      expect(outcome.action).toBe("retry");
-      if (outcome.action !== "retry") {
-        return;
-      }
-      expect(outcome.retryKind).toBe("profile_rotation");
-      expect(maybeRetryTransient).not.toHaveBeenCalled();
-      expect(advanceRateLimitAuthProfile).toHaveBeenCalledTimes(1);
-    });
-
-    it("retries the same model on a status-prefixed 429 with no window wording", async () => {
-      const maybeRetryTransient = vi.fn(async () => true);
-      const advanceRateLimitAuthProfile = vi.fn(async () => true);
-
-      const outcome = await handleAssistantFailover(
-        makeParams({
-          initialDecision: { action: "rotate_profile", reason: "rate_limit" },
-          failoverReason: "rate_limit",
-          billingFailure: false,
-          rateLimitFailure: true,
-          lastAssistant: {
-            errorMessage: "429 Provider returned error",
-          } as Params["lastAssistant"],
-          maybeRetryTransient,
-          advanceRateLimitAuthProfile,
-        }),
-      );
-
-      expect(outcome.action).toBe("retry");
-      if (outcome.action !== "retry") {
-        return;
-      }
-      expect(outcome.retryKind).toBe("same_model_transient");
-      expect(maybeRetryTransient).toHaveBeenCalledTimes(1);
-      expect(advanceRateLimitAuthProfile).not.toHaveBeenCalled();
-    });
-
-    it("does not spend same-model retry budget when Retry-After is long", async () => {
-      const maybeRetryTransient = vi.fn(async () => true);
-      const advanceRateLimitAuthProfile = vi.fn(async () => true);
-
-      const outcome = await handleAssistantFailover(
-        makeParams({
-          initialDecision: { action: "rotate_profile", reason: "rate_limit" },
-          failoverReason: "rate_limit",
-          billingFailure: false,
-          rateLimitFailure: true,
-          lastAssistant: {
-            errorMessage: "429 rate_limit_exceeded; Retry-After: 3600",
-          } as Params["lastAssistant"],
-          maybeRetryTransient,
-          advanceRateLimitAuthProfile,
-        }),
-      );
-
-      expect(outcome.action).toBe("retry");
-      if (outcome.action !== "retry") {
-        return;
-      }
-      expect(outcome.retryKind).toBe("profile_rotation");
-      expect(maybeRetryTransient).not.toHaveBeenCalled();
-      expect(advanceRateLimitAuthProfile).toHaveBeenCalledTimes(1);
-    });
-
-    it("does not spend same-model retry budget when Retry-After date is beyond the retry budget", async () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-06-11T00:00:00.000Z"));
-      try {
-        const maybeRetryTransient = vi.fn(async () => true);
-        const advanceRateLimitAuthProfile = vi.fn(async () => true);
-
-        const outcome = await handleAssistantFailover(
-          makeParams({
-            initialDecision: { action: "rotate_profile", reason: "rate_limit" },
-            failoverReason: "rate_limit",
-            billingFailure: false,
-            rateLimitFailure: true,
-            lastAssistant: {
-              errorMessage: "429 rate_limit_exceeded; Retry-After: Thu, 11 Jun 2026 01:05:00 GMT",
-            } as Params["lastAssistant"],
-            maybeRetryTransient,
-            advanceRateLimitAuthProfile,
-          }),
-        );
-
-        expect(outcome.action).toBe("retry");
-        if (outcome.action !== "retry") {
-          return;
-        }
-        expect(outcome.retryKind).toBe("profile_rotation");
-        expect(maybeRetryTransient).not.toHaveBeenCalled();
-        expect(advanceRateLimitAuthProfile).toHaveBeenCalledTimes(1);
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    it("allows short Retry-After intervals to use same-model retry", async () => {
-      const maybeRetryTransient = vi.fn(async () => true);
-      const advanceRateLimitAuthProfile = vi.fn(async () => true);
-
-      const outcome = await handleAssistantFailover(
-        makeParams({
-          initialDecision: { action: "rotate_profile", reason: "rate_limit" },
-          failoverReason: "rate_limit",
-          billingFailure: false,
-          rateLimitFailure: true,
-          lastAssistant: {
-            errorMessage: "429 rate_limit_exceeded; Retry-After: 30 seconds",
-          } as Params["lastAssistant"],
-          maybeRetryTransient,
-          advanceRateLimitAuthProfile,
-        }),
-      );
-
-      expect(outcome.action).toBe("retry");
-      if (outcome.action !== "retry") {
-        return;
-      }
-      expect(outcome.retryKind).toBe("same_model_transient");
-      expect(maybeRetryTransient).toHaveBeenCalledTimes(1);
-      expect(advanceRateLimitAuthProfile).not.toHaveBeenCalled();
-    });
-
-    it("allows RESOURCE_EXHAUSTED messages with short-window 429 hints", async () => {
-      const maybeRetryTransient = vi.fn(async () => true);
-      const advanceRateLimitAuthProfile = vi.fn(async () => true);
-
-      const outcome = await handleAssistantFailover(
-        makeParams({
-          initialDecision: { action: "rotate_profile", reason: "rate_limit" },
-          failoverReason: "rate_limit",
-          billingFailure: false,
-          rateLimitFailure: true,
-          lastAssistant: {
-            errorMessage: "429 RESOURCE_EXHAUSTED: tokens per minute limit exceeded",
-          } as Params["lastAssistant"],
-          maybeRetryTransient,
-          advanceRateLimitAuthProfile,
-        }),
-      );
-
-      expect(outcome.action).toBe("retry");
-      if (outcome.action !== "retry") {
-        return;
-      }
-      expect(outcome.retryKind).toBe("same_model_transient");
-      expect(maybeRetryTransient).toHaveBeenCalledTimes(1);
-      expect(advanceRateLimitAuthProfile).not.toHaveBeenCalled();
-    });
-
-    it("allows quota wording when it points at a per-minute throttle", async () => {
-      const maybeRetryTransient = vi.fn(async () => true);
-      const advanceRateLimitAuthProfile = vi.fn(async () => true);
-
-      const outcome = await handleAssistantFailover(
-        makeParams({
-          initialDecision: { action: "rotate_profile", reason: "rate_limit" },
-          failoverReason: "rate_limit",
-          billingFailure: false,
-          rateLimitFailure: true,
-          lastAssistant: {
-            errorMessage:
-              "Quota exceeded for quota metric 'Generate requests per minute' and limit 'Generate requests per minute per project'.",
-          } as Params["lastAssistant"],
-          maybeRetryTransient,
-          advanceRateLimitAuthProfile,
-        }),
-      );
-
-      expect(outcome.action).toBe("retry");
-      if (outcome.action !== "retry") {
-        return;
-      }
-      expect(outcome.retryKind).toBe("same_model_transient");
-      expect(maybeRetryTransient).toHaveBeenCalledTimes(1);
-      expect(advanceRateLimitAuthProfile).not.toHaveBeenCalled();
-    });
-
-    it("falls back to profile rotation after the same-model rate-limit budget is exhausted", async () => {
-      const maybeRetryTransient = vi.fn(async () => false);
-      const advanceRateLimitAuthProfile = vi.fn(async () => true);
-
-      const outcome = await handleAssistantFailover(
-        makeParams({
-          initialDecision: { action: "rotate_profile", reason: "rate_limit" },
-          failoverReason: "rate_limit",
-          billingFailure: false,
-          rateLimitFailure: true,
-          lastAssistant: {
-            errorMessage: "429 rate_limit_exceeded: too many requests per minute",
-          } as Params["lastAssistant"],
-          maybeRetryTransient,
-          advanceRateLimitAuthProfile,
-        }),
-      );
-
-      expect(outcome.action).toBe("retry");
-      if (outcome.action !== "retry") {
-        return;
-      }
-      expect(outcome.retryKind).toBe("profile_rotation");
-      expect(maybeRetryTransient).toHaveBeenCalledTimes(1);
       expect(advanceRateLimitAuthProfile).toHaveBeenCalledTimes(1);
     });
 
@@ -629,30 +313,6 @@ describe("handleAssistantFailover", () => {
         expect(signal.aborted).toBe(false);
       },
     );
-
-    it("logs the incremented count after a successful transient retry", async () => {
-      let transientRetryCount = 0;
-      const logAssistantFailoverDecision = vi.fn();
-      const outcome = await handleAssistantFailover(
-        makeParams({
-          initialDecision: { action: "surface_error", reason: "server_error" },
-          failoverReason: "server_error",
-          billingFailure: false,
-          maybeRetryTransient: vi.fn(async () => {
-            transientRetryCount += 1;
-            return true;
-          }),
-          getTransientRetryCount: () => transientRetryCount,
-          logAssistantFailoverDecision,
-        }),
-      );
-
-      expect(outcome.action).toBe("retry");
-      expect(logAssistantFailoverDecision).toHaveBeenCalledWith("retry_same_model", {
-        retryCount: 1,
-        profileRotationCount: 0,
-      });
-    });
 
     it("throws a billing FailoverError so the webchat can render the provider failure", async () => {
       const logDecision = vi.fn();
@@ -917,17 +577,5 @@ describe("handleAssistantFailover", () => {
         expect.objectContaining({ status: 402, retryCount: 0, profileRotationCount: 0 }),
       );
     });
-  });
-});
-
-describe("isShortWindowRateLimitMessage", () => {
-  it.each([
-    ["429 Provider returned error", true],
-    ["429 insufficient_quota: You exceeded your current quota", false],
-    ["429 usage limit reached for this billing period", false],
-    ["Provider API error (429): Provider returned error", false],
-    ["rate limit exceeded", false],
-  ])("classifies %s", (message, expected) => {
-    expect(isShortWindowRateLimitMessage(message)).toBe(expected);
   });
 });

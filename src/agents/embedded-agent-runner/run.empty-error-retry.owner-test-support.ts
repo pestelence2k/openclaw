@@ -72,7 +72,6 @@ function makeInput(
     overloadProfileRotationLimit: 1,
     previousRetryFailoverReason: null,
     maybeMarkAuthProfileFailure: vi.fn(async () => {}),
-    maybeRetryTransient: vi.fn(async () => false),
     getTransientRetryCount: () => 0,
     advanceAuthProfile: vi.fn(async () => false),
     advanceRateLimitAuthProfile: vi.fn(async () => false),

@@ -532,7 +532,6 @@ export async function runPreparedEmbeddedLoop(
         overloadProfileRotationLimit: failoverRetryController.overloadProfileRotationLimit,
         previousRetryFailoverReason: lastRetryFailoverReason,
         maybeMarkAuthProfileFailure: failoverRetryController.maybeMarkAuthProfileFailure,
-        maybeRetryTransient: failoverRetryController.maybeRetryTransient,
         getTransientRetryCount: () => failoverRetryController.transientRetryCount,
         advanceAuthProfile: failoverRetryController.advanceAuthProfile,
         advanceRateLimitAuthProfile: failoverRetryController.advanceRateLimitAuthProfile,

@@ -19,7 +19,6 @@ import {
 import { buildAssistantFailoverSignal } from "../../embedded-agent-helpers/assistant-message-failures.js";
 import { FailoverError, resolveFailoverStatus } from "../../failover-error.js";
 import type { PreparedProviderFailoverOwner } from "../../failover/provider-patterns.js";
-import { classifyRateLimitWindow, resolveRetryAfterMs } from "../../failover/retry-evidence.js";
 import {
   mergeRetryFailoverReason,
   resolveRunFailoverDecision,
@@ -36,21 +35,15 @@ type AssistantFailoverOutcome =
       action: "retry";
       overloadProfileRotations: number;
       lastRetryFailoverReason: FailoverReason | null;
-      retryKind: "profile_rotation" | "same_model_transient";
     }
   | {
       action: "throw";
       overloadProfileRotations: number;
       error: FailoverError;
     };
-export function isShortWindowRateLimitMessage(message: string | undefined): boolean {
-  return classifyRateLimitWindow(message).kind === "short";
-}
-
 /**
  * Applies an assistant-stage failover decision and returns the next run action.
- * It owns auth-profile rotation, overload/rate-limit escalation, same-model
- * idle-timeout retry, and FailoverError construction for outer model fallback.
+ * It owns auth-profile rotation and escalation after transient recovery ends.
  */
 export async function handleAssistantFailover(params: {
   initialDecision: AssistantFailoverDecision;
@@ -96,10 +89,6 @@ export async function handleAssistantFailover(params: {
     reason?: AuthProfileFailureReason | null;
     modelId?: string;
   }) => Promise<void>;
-  maybeRetryTransient: (retry: {
-    reason: FailoverReason;
-    retryAfterMs?: number;
-  }) => Promise<boolean>;
   advanceAuthProfile: () => Promise<boolean>;
   advanceRateLimitAuthProfile: (context: {
     failoverProvider: string;
@@ -117,45 +106,6 @@ export async function handleAssistantFailover(params: {
   const externalAbort = terminal.externalAbort || signalOwnedInterruption;
   let overloadProfileRotations = params.overloadProfileRotations;
   let decision = params.initialDecision;
-  const sameModelTransientRetry = (): AssistantFailoverOutcome => ({
-    action: "retry",
-    overloadProfileRotations,
-    retryKind: "same_model_transient",
-    lastRetryFailoverReason: mergeRetryFailoverReason({
-      previous: params.previousRetryFailoverReason,
-      failoverReason: params.failoverReason,
-      timedOut: terminal.timedOut,
-    }),
-  });
-
-  const canRetryRateLimit =
-    params.failoverReason !== "rate_limit" ||
-    isShortWindowRateLimitMessage(params.lastAssistant?.errorMessage);
-  // A silent idle timeout carries no classifiable provider error, so it
-  // arrives with a null reason; consult the retry owner as a timeout so the
-  // quiet same-model replay stays budgeted by the single transient owner
-  // (the idle-timeout breaker still caps consecutive silent attempts).
-  const transientConsultReason =
-    params.failoverReason ?? (terminal.idleTimedOut ? "timeout" : null);
-  if (
-    !externalAbort &&
-    canRetryRateLimit &&
-    transientConsultReason &&
-    (decision.action === "rotate_profile" ||
-      decision.action === "fallback_model" ||
-      decision.action === "surface_error") &&
-    (await params.maybeRetryTransient({
-      reason: transientConsultReason,
-      retryAfterMs: resolveRetryAfterMs(params.lastAssistant?.errorMessage),
-    }))
-  ) {
-    params.logAssistantFailoverDecision("retry_same_model", {
-      retryCount: params.getTransientRetryCount(),
-      profileRotationCount: overloadProfileRotations,
-    });
-    return sameModelTransientRetry();
-  }
-
   if (decision.action === "rotate_profile") {
     const failedProfileId = params.lastProfileId;
     const timeoutFailure = terminal.timedOut;
@@ -211,9 +161,6 @@ export async function handleAssistantFailover(params: {
 
     let rotated: boolean;
     if (params.failoverReason === "rate_limit") {
-      // Minute-scale RPM windows can clear without spending a profile rotation
-      // or model fallback. Keep the retry bounded; once exhausted, continue
-      // through the existing rate-limit escalation path.
       rotated = await params.advanceRateLimitAuthProfile({
         failoverProvider: params.activeErrorContext.provider,
         failoverModel: params.activeErrorContext.model,
@@ -251,7 +198,6 @@ export async function handleAssistantFailover(params: {
       return {
         action: "retry",
         overloadProfileRotations,
-        retryKind: "profile_rotation",
         lastRetryFailoverReason: mergeRetryFailoverReason({
           previous: params.previousRetryFailoverReason,
           failoverReason: params.failoverReason,

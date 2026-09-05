@@ -104,7 +104,6 @@ function makeExhaustedCredentialFailureInput(options?: { replaySafe?: boolean })
     previousRetryFailoverReason: null,
     maybeMarkAuthProfileFailure,
     getTransientRetryCount: () => 0,
-    maybeRetryTransient: vi.fn(async () => false),
     advanceAuthProfile,
     advanceRateLimitAuthProfile: vi.fn(async () => true),
     traceAttempts,
@@ -147,7 +146,6 @@ function makeIdleTimeoutFailureInput(options?: { replaySafe?: boolean }) {
   fixture.input.terminalState = resolveEmbeddedRunAttemptTerminalState({ attempt, assistant });
   fixture.input.emptyErrorRetries = 0;
   fixture.input.maybeRefreshRuntimeAuthForAuthError = vi.fn(async () => true);
-  fixture.input.maybeRetryTransient = vi.fn(async () => true);
   fixture.input.advanceRateLimitAuthProfile = vi.fn(async () => true);
   return fixture;
 }
@@ -593,7 +591,6 @@ describe("handleEmbeddedAssistantFailure", () => {
 
     expect(outcome.action).toBe("proceed");
     expect(fixture.input.maybeRefreshRuntimeAuthForAuthError).not.toHaveBeenCalled();
-    expect(fixture.input.maybeRetryTransient).not.toHaveBeenCalled();
     expect(fixture.advanceAuthProfile).not.toHaveBeenCalled();
     expect(fixture.input.advanceRateLimitAuthProfile).not.toHaveBeenCalled();
     expect(fixture.traceAttempts).toEqual([]);
@@ -602,15 +599,9 @@ describe("handleEmbeddedAssistantFailure", () => {
   it("keeps replay-safe idle timeout profile rotation available", async () => {
     const fixture = makeIdleTimeoutFailureInput({ replaySafe: true });
     fixture.input.maybeRefreshRuntimeAuthForAuthError = vi.fn(async () => false);
-    // Retry budget exhausted: the silent idle timeout consults the transient
-    // owner first, then falls through to profile rotation.
-    fixture.input.maybeRetryTransient = vi.fn(async () => false);
 
     const outcome = await handleEmbeddedAssistantFailure(fixture.input);
 
-    expect(fixture.input.maybeRetryTransient).toHaveBeenCalledWith(
-      expect.objectContaining({ reason: "timeout" }),
-    );
     expect(outcome).toMatchObject({ action: "retry", lastRetryFailoverReason: "timeout" });
     expect(fixture.advanceAuthProfile).toHaveBeenCalledOnce();
     expect(fixture.traceAttempts).toEqual([
@@ -645,7 +636,6 @@ describe("handleEmbeddedAssistantFailure", () => {
         assistant: fixture.input.currentAttemptAssistant,
       });
       fixture.input.maybeRefreshRuntimeAuthForAuthError = vi.fn(async () => false);
-      fixture.input.maybeRetryTransient = vi.fn(async () => false);
       fixture.input.advanceAuthProfile = vi.fn(async () => false);
 
       expect(fixture.input.terminalState.outcome).toMatchObject({
@@ -691,56 +681,16 @@ describe("handleEmbeddedAssistantFailure", () => {
       fixture.input.terminalState = resolveEmbeddedRunAttemptTerminalState({ attempt, assistant });
       fixture.input.emptyErrorRetries = 0;
       fixture.input.maybeRefreshRuntimeAuthForAuthError = vi.fn(async () => true);
-      fixture.input.maybeRetryTransient = vi.fn(async () => true);
 
       const outcome = await handleEmbeddedAssistantFailure(fixture.input);
 
       expect(outcome.action).toBe("proceed");
       expect(fixture.input.maybeRefreshRuntimeAuthForAuthError).not.toHaveBeenCalled();
-      expect(fixture.input.maybeRetryTransient).not.toHaveBeenCalled();
       expect(fixture.advanceAuthProfile).not.toHaveBeenCalled();
       expect(fixture.input.advanceRateLimitAuthProfile).not.toHaveBeenCalled();
       expect(fixture.traceAttempts).toEqual([]);
     },
   );
-
-  it("records a same-model rate-limit retry without a profile-rotation trace", async () => {
-    const fixture = makeExhaustedCredentialFailureInput();
-    const assistant = buildEmbeddedRunnerAssistant({
-      stopReason: "error",
-      errorMessage: "HTTP 429 Too Many Requests",
-      content: [{ type: "text", text: "rate limited" }],
-    });
-    const attempt = makeEmbeddedRunnerAttempt({
-      assistantTexts: [],
-      lastAssistant: assistant,
-      currentAttemptAssistant: assistant,
-      currentAttemptReplayMetadata: { hadPotentialSideEffects: false, replaySafe: true },
-    });
-    fixture.input.attempt = attempt;
-    fixture.input.attemptAssistant = assistant;
-    fixture.input.currentAttemptAssistant = assistant;
-    fixture.input.terminalState = resolveEmbeddedRunAttemptTerminalState({ attempt, assistant });
-    fixture.input.emptyErrorRetries = 0;
-    fixture.input.maybeRetryTransient = vi.fn(async () => true);
-    providerRuntimeMocks.classifyProviderFailoverSignalWithPlugin.mockReturnValueOnce("rate_limit");
-
-    const outcome = await handleEmbeddedAssistantFailure(fixture.input);
-
-    expect(outcome).toMatchObject({
-      action: "retry",
-    });
-    expect(fixture.advanceAuthProfile).not.toHaveBeenCalled();
-    expect(fixture.traceAttempts).toEqual([
-      {
-        provider: "anthropic",
-        model: "mock-1",
-        result: "same_model_transient",
-        reason: "rate_limit",
-        stage: "assistant",
-      },
-    ]);
-  });
 
   it("retries a replay-safe reasoning-only assistant error before failover", async () => {
     const fixture = makeExhaustedCredentialFailureInput();
@@ -769,7 +719,6 @@ describe("handleEmbeddedAssistantFailure", () => {
     fixture.input.terminalState = resolveEmbeddedRunAttemptTerminalState({ attempt, assistant });
     fixture.input.emptyErrorRetries = 0;
     fixture.input.maybeRefreshRuntimeAuthForAuthError = vi.fn(async () => true);
-    fixture.input.maybeRetryTransient = vi.fn(async () => true);
 
     const outcome = await handleEmbeddedAssistantFailure(fixture.input);
 
@@ -778,7 +727,6 @@ describe("handleEmbeddedAssistantFailure", () => {
       emptyErrorRetries: 1,
     });
     expect(fixture.input.maybeRefreshRuntimeAuthForAuthError).not.toHaveBeenCalled();
-    expect(fixture.input.maybeRetryTransient).not.toHaveBeenCalled();
     expect(fixture.advanceAuthProfile).not.toHaveBeenCalled();
     expect(fixture.traceAttempts).toEqual([]);
   });

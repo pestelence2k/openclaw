@@ -53,7 +53,6 @@ function makeParams(overrides: Partial<Params> = {}): Params {
     advanceAuthProfile: vi.fn(async () => true),
     advanceRateLimitAuthProfile: vi.fn(async () => true),
     maybeMarkAuthProfileFailure: vi.fn(async () => {}),
-    maybeRetryTransient: vi.fn(async () => false),
     getTransientRetryCount: () => 0,
     attemptedThinking: new Set(),
     thinkLevel: "low",
@@ -124,7 +123,6 @@ describe("handleEmbeddedPromptFailure", () => {
         stopReason: "timeout",
         ...(phase === "prompt" ? { timeoutPhase: "provider", providerStarted: true } : {}),
       });
-      expect(params.maybeRetryTransient).not.toHaveBeenCalled();
       expect(params.advanceAuthProfile).not.toHaveBeenCalled();
       expect(error).toHaveProperty("cause", params.promptError);
     },
@@ -171,7 +169,6 @@ describe("handleEmbeddedPromptFailure", () => {
         params.advanceAuthProfile,
         params.advanceRateLimitAuthProfile,
         params.maybeMarkAuthProfileFailure,
-        params.maybeRetryTransient,
       ]) {
         expect(callback).not.toHaveBeenCalled();
       }
@@ -228,7 +225,6 @@ describe("handleEmbeddedPromptFailure", () => {
       modelId: "sonnet",
       activeErrorContext: { provider: "claude-cli", model: "sonnet" },
       maybeRefreshRuntimeAuthForAuthError: vi.fn(async () => true),
-      maybeRetryTransient: vi.fn(async () => true),
       resolveAuthProfileFailureReason: vi.fn(() => null),
     });
 
@@ -238,7 +234,6 @@ describe("handleEmbeddedPromptFailure", () => {
 
     for (const callback of [
       params.maybeRefreshRuntimeAuthForAuthError,
-      params.maybeRetryTransient,
       params.advanceAuthProfile,
       params.advanceRateLimitAuthProfile,
     ]) {

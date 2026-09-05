@@ -652,7 +652,9 @@ suite.define(() => {
         expect(await firstRow.textContent()).toContain("Ownership review complete");
         expect(await firstRow.locator(".chat-diffstat__add").textContent()).toBe("+14");
         expect(await firstRow.locator(".chat-diffstat__del").textContent()).toBe("-3");
-        expect(await secondRow.textContent()).toContain("Subagent working");
+        expect(await secondRow.locator(".chat-subagent-activity__label").textContent()).toBe(
+          "Subagent",
+        );
         expect(await secondRow.textContent()).toContain("Checking tool card rendering");
         await writeFile(
           path.join(activityDir, "02-one-subagent-finished.png"),

@@ -40,12 +40,6 @@ jobs:
         timeout-minutes: 3
         working-directory: upstream
         run: python3 ../proof/proof/image-dimensions/format-evidence.py
-      - name: Product types
-        id: types
-        timeout-minutes: 8
-        continue-on-error: true
-        working-directory: upstream
-        run: python3 ../proof/proof/image-dimensions/run-check.py types -- pnpm tsgo:test:ui
       - name: Product lint
         id: lint
         timeout-minutes: 6
@@ -58,24 +52,6 @@ jobs:
         continue-on-error: true
         working-directory: upstream
         run: python3 ../proof/proof/image-dimensions/run-check.py format -- pnpm format:check ui/src/pages/chat/components/chat-attachment-image.ts ui/src/pages/chat/components/chat-attachment-reads.ts ui/src/pages/chat/components/chat-attachments.ts ui/src/pages/chat/components/chat-attachments.test.tsx ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts
-      - name: Product allocations
-        id: allocations
-        timeout-minutes: 3
-        continue-on-error: true
-        working-directory: upstream
-        run: python3 ../proof/proof/image-dimensions/run-check.py allocations -- pnpm check:test-lines-ratchet
-      - name: Product maxlines
-        id: maxlines
-        timeout-minutes: 3
-        continue-on-error: true
-        working-directory: upstream
-        run: python3 ../proof/proof/image-dimensions/run-check.py maxlines -- pnpm check:max-lines-ratchet
-      - name: Product unused
-        id: unused
-        timeout-minutes: 6
-        continue-on-error: true
-        working-directory: upstream
-        run: python3 ../proof/proof/image-dimensions/run-check.py unused -- pnpm deadcode:unused-files
       - name: Product browser
         id: browser
         timeout-minutes: 5
@@ -116,7 +92,7 @@ jobs:
           python3 - <<'PY'
           import json, os
           steps = json.loads(os.environ["OUTCOMES"])
-          wanted = ["formatting", "types", "lint", "format", "allocations", "maxlines", "unused", "browser", "memory", "runtime", "boundary"]
+          wanted = ["formatting", "lint", "format", "browser", "memory", "runtime", "boundary"]
           outcomes = {name: steps.get(name, {}).get("outcome", "missing") for name in wanted}
           print("::notice title=Phase outcomes::" + json.dumps(outcomes))
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:

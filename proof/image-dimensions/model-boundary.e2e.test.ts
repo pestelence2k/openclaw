@@ -5,7 +5,7 @@ import path from "node:path";
 import { expect, it } from "vitest";
 import { createControlUiE2eSuite } from "../../../ui/src/e2e/control-ui-e2e-suite.test-support.ts";
 import { waitForControlUiGatewayReady } from "../../../ui/src/test-helpers/control-ui-e2e-readiness.ts";
-import { controlUiSessionUrl } from "../../../ui/src/test-helpers/control-ui-e2e.ts";
+import { navigateToControlUiSession } from "../../../ui/src/test-helpers/control-ui-e2e.ts";
 import { authenticateControlUi, startControlUiGateway, stopControlUiGateway } from "./control-ui-gateway.e2e.test-support.ts";
 import { createQaLiveLaneGateway } from "./live-transports/shared/live-gateway.runtime.ts";
 
@@ -47,12 +47,15 @@ suite.define(() => {
       await authenticateControlUi(page, gateway.gateway);
       for (const route of ["picker", "paste", "drop"] as const) {
         const sessionKey = "agent:qa:image-proof-" + route;
-        await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
+        console.log("IMAGE_PHASE " + route + " session-create");
+        await gateway.gateway.call("sessions.create", { key: sessionKey, agentId: "qa", label: "Image proof " + route });
+        await page.goto(new URL("chat", suite.server.baseUrl).href);
         await waitForControlUiGatewayReady(page);
-        await page.waitForFunction((key) => {
-          const pane = document.querySelector<HTMLElement & { state?: { connected: boolean; sessionKey: string; chatLoading: boolean } }>("openclaw-chat-pane.chat-pane-cache__pane--visible");
-          return pane?.state?.connected === true && pane.state.sessionKey === key && !pane.state.chatLoading;
-        }, sessionKey);
+        await navigateToControlUiSession(page, sessionKey);
+        const composer = page.getByRole("textbox", { name: "Chat composer", exact: true });
+        await composer.waitFor({ state: "visible" });
+        await expect.poll(() => composer.isEnabled()).toBe(true);
+        console.log("IMAGE_PHASE " + route + " ready");
         const dataUrl = await page.evaluate(async () => {
           const canvas = document.createElement("canvas");
           canvas.width = 8160; canvas.height = 4590;
@@ -72,7 +75,6 @@ suite.define(() => {
         const original = Buffer.from(dataUrl.split(",")[1], "base64");
         const originalSha = createHash("sha256").update(original).digest("hex");
         expect(original.length).toBeLessThan(6 * 1024 * 1024);
-        const composer = page.locator(".agent-chat__composer-combobox textarea");
         await composer.fill("Reply exactly `IMAGE_PROOF_" + route.toUpperCase() + "_OK`");
         if (route === "picker") {
           await page.locator(".agent-chat__file-input").setInputFiles({ name: "synthetic.jpg", mimeType: "image/jpeg", buffer: original });
@@ -90,6 +92,7 @@ suite.define(() => {
         }
         const filename = route === "paste" ? "pasted-image.jpeg" : "synthetic.jpg";
         await page.getByRole("img", { name: filename }).waitFor();
+        console.log("IMAGE_PHASE " + route + " prepared");
         await page.getByRole("button", { name: "Send message" }).click();
         const userImage = page.locator(".chat-group.user img.chat-message-image");
         await expect.poll(() => userImage.first().evaluate((image) => image instanceof HTMLImageElement && image.complete ? image.naturalWidth : 0), { timeout: 30000 }).toBe(4096);

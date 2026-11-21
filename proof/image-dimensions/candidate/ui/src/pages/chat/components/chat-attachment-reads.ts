@@ -412,10 +412,7 @@ export function readChatAttachmentFile(
       Math.min(imageLimit, entry.reservedBytes ?? imageLimit),
       preparation.signal,
       setProcessing,
-    ).then(
-      readPreparedFile,
-      () => finish("error"),
-    );
+    ).then(readPreparedFile, () => finish("error"));
   } else {
     readPreparedFile(file);
   }

@@ -29,8 +29,8 @@ export function canResizeChatAttachment(file: File): boolean {
   return file.type === "image/png" || file.type === "image/jpeg";
 }
 
-// JPEG source admission is experimental; matching a backend cap is not browser memory proof.
-const MAX_JPEG_SOURCE_PIXELS = 64_000_000;
+// Admit the 37.45 MP photo case without allowing unbounded browser source allocation.
+const MAX_JPEG_SOURCE_PIXELS = 40_000_000;
 
 async function readResizeDimensions(
   file: File,
@@ -43,9 +43,11 @@ async function readResizeDimensions(
       throw new Error("Invalid JPEG header");
     }
     // Walk marker headers, not compressed pixels or potentially large EXIF data.
-    for (let offset = 2, markers = 0;
+    for (
+      let offset = 2, markers = 0;
       offset + 4 <= file.size && offset < 1024 * 1024 && markers < 256;
-      markers += 1) {
+      markers += 1
+    ) {
       const header = new DataView(await file.slice(offset, offset + 9).arrayBuffer());
       signal.throwIfAborted();
       if (header.getUint8(0) !== 0xff) {

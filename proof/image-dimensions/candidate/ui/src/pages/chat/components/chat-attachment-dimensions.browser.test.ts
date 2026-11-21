@@ -14,7 +14,9 @@ async function jpeg(width: number, height: number): Promise<File> {
     context.fillStyle = "#2468ac";
     context.fillRect(0, 0, width, height);
     const blob = expectDefined(
-      await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9)),
+      await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob(resolve, "image/jpeg", 0.9);
+      }),
       "fixture JPEG",
     );
     return new File([blob], "synthetic.jpg", { type: "image/jpeg", lastModified: 1234 });
@@ -122,7 +124,7 @@ describe.runIf("__vitest_browser__" in globalThis)("dimension-aware attachment p
     [255, 216, 255, 224, 0, 1],
     [255, 216, 255, 224, 255, 255],
     [255, 216, 255, 195, 0, 8, 8, 0, 1, 0, 1, 0],
-    [255, 216, ...new Array<number>(1024).fill(255)],
+    [255, 216, ...Array.from({ length: 1024 }, () => 255)],
   ])("rejects malformed, unsupported or excessive JPEG marker headers", async (...bytes) => {
     await expect(resizeChatAttachmentImage(
       new File([new Uint8Array(bytes)], "invalid.jpg", { type: "image/jpeg" }),

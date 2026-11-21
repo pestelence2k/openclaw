@@ -1,4 +1,4 @@
-# Task-owned secretless experimental proof; no PR publication.
+# Task-owned secretless correction/proof phase. No PR publication.
 name: Image Dimensions 5f40ae04 Proof
 on:
   push:
@@ -33,89 +33,93 @@ jobs:
           npm install --global pnpm@12.15.0
           pnpm install --frozen-lockfile
           node --import ./scripts/tsx.mjs scripts/ensure-playwright-chromium.mts
-      - name: Overlay only the regression on the pinned base
-        run: cp proof/proof/image-dimensions/candidate/ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts upstream/ui/src/pages/chat/components/
-      - name: Baseline regression
-        timeout-minutes: 5
-        id: baseline
-        continue-on-error: true
-        working-directory: upstream
-        run: |
-          set +e
-          node scripts/run-vitest.mjs run --config test/vitest/vitest.ui-browser.config.ts --configLoader runner ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts --maxWorkers=1 -t 'prepares a below-byte-limit 37 MP JPEG via file' > ../baseline.log 2>&1
-          result=$?
-          cat ../baseline.log
-          if [ "$result" -eq 0 ]; then
-            echo "::error::Baseline unexpectedly passed"
-            exit 1
-          fi
-          if ! grep -Eq 'expected 8160 to be 4096' ../baseline.log; then
-            echo "::error::Baseline did not establish the expected dimension failure"
-            exit 1
-          fi
-          echo '::notice title=Proof baseline::Expected 8160 versus 4096 assertion observed on pinned base.'
-          echo 'Baseline: expected high-pixel dimension failure observed; inspect assertion in log.' >> "$GITHUB_STEP_SUMMARY"
       - name: Apply reviewed candidate
         run: cp proof/proof/image-dimensions/candidate/ui/src/pages/chat/components/* upstream/ui/src/pages/chat/components/
-      - name: Candidate browser proof
-        id: browser
-        timeout-minutes: 8
-        continue-on-error: true
+      - name: Format exact product paths and stage real base accounting
+        id: formatting
+        timeout-minutes: 3
         working-directory: upstream
-        run: python3 ../proof/proof/image-dimensions/run-check.py browser -- node scripts/run-vitest.mjs run --config test/vitest/vitest.ui-browser.config.ts --configLoader runner ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts ui/src/pages/chat/components/chat-attachment-resize.browser.test.ts ui/src/pages/chat/components/chat-attachment-inputs.browser.test.ts --maxWorkers=1
-      - name: Candidate lifecycle proof
-        id: lifecycle
-        timeout-minutes: 8
-        continue-on-error: true
-        working-directory: upstream
-        run: python3 ../proof/proof/image-dimensions/run-check.py lifecycle -- pnpm test ui/src/pages/chat/components/chat-attachments.test.tsx --maxWorkers=1
-      - name: Typecheck
+        run: python3 ../proof/proof/image-dimensions/format-evidence.py
+      - name: Product types
         id: types
         timeout-minutes: 8
         continue-on-error: true
         working-directory: upstream
-        run: python3 ../proof/proof/image-dimensions/run-check.py types -- pnpm tsgo:ui
-      - name: Targeted lint
+        run: python3 ../proof/proof/image-dimensions/run-check.py types -- pnpm tsgo:test:ui
+      - name: Product lint
         id: lint
-        timeout-minutes: 8
+        timeout-minutes: 6
         continue-on-error: true
         working-directory: upstream
         run: python3 ../proof/proof/image-dimensions/run-check.py lint -- node scripts/run-oxlint.mjs --tsconfig tsconfig.ui.json ui/src/pages/chat/components/chat-attachment-image.ts ui/src/pages/chat/components/chat-attachment-reads.ts ui/src/pages/chat/components/chat-attachments.ts ui/src/pages/chat/components/chat-attachments.test.tsx ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts
-      - name: Targeted format
+      - name: Product format
         id: format
-        timeout-minutes: 8
+        timeout-minutes: 2
         continue-on-error: true
         working-directory: upstream
         run: python3 ../proof/proof/image-dimensions/run-check.py format -- pnpm format:check ui/src/pages/chat/components/chat-attachment-image.ts ui/src/pages/chat/components/chat-attachment-reads.ts ui/src/pages/chat/components/chat-attachments.ts ui/src/pages/chat/components/chat-attachments.test.tsx ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts
-      - name: Production UI build
-        id: build
-        timeout-minutes: 15
+      - name: Product allocations
+        id: allocations
+        timeout-minutes: 3
         continue-on-error: true
         working-directory: upstream
-        run: python3 ../proof/proof/image-dimensions/run-check.py build -- pnpm ui:build
-      - name: Required allocation and unused-file checks
-        id: allocation
-        timeout-minutes: 8
+        run: python3 ../proof/proof/image-dimensions/run-check.py allocations -- pnpm check:test-lines-ratchet
+      - name: Product maxlines
+        id: maxlines
+        timeout-minutes: 3
+        continue-on-error: true
+        working-directory: upstream
+        run: python3 ../proof/proof/image-dimensions/run-check.py maxlines -- pnpm check:max-lines-ratchet
+      - name: Product unused
+        id: unused
+        timeout-minutes: 6
+        continue-on-error: true
+        working-directory: upstream
+        run: python3 ../proof/proof/image-dimensions/run-check.py unused -- pnpm deadcode:unused-files
+      - name: Product browser
+        id: browser
+        timeout-minutes: 5
+        continue-on-error: true
+        working-directory: upstream
+        run: python3 ../proof/proof/image-dimensions/run-check.py browser -- node scripts/run-vitest.mjs run --config test/vitest/vitest.ui-browser.config.ts --configLoader runner ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts ui/src/pages/chat/components/chat-attachment-resize.browser.test.ts ui/src/pages/chat/components/chat-attachment-inputs.browser.test.ts --maxWorkers=1
+      - name: Near-cap JPEG Chromium OS memory qualification
+        id: memory
+        timeout-minutes: 5
         continue-on-error: true
         working-directory: upstream
         run: |
-          python3 ../proof/proof/image-dimensions/run-check.py allocations -- pnpm check:test-lines-ratchet
-          python3 ../proof/proof/image-dimensions/run-check.py max-lines -- pnpm check:max-lines-ratchet
-          python3 ../proof/proof/image-dimensions/run-check.py unused-files -- pnpm deadcode:unused-files
-      - name: Summarize exact proof outcomes
+          cp ../proof/proof/image-dimensions/memory.browser.test.ts ui/src/pages/chat/components/image-proof-memory.browser.test.ts
+          python3 ../proof/proof/image-dimensions/run-check.py memory -- python3 ../proof/proof/image-dimensions/memory-check.py node scripts/run-vitest.mjs run --config test/vitest/vitest.ui-browser.config.ts --configLoader runner ui/src/pages/chat/components/image-proof-memory.browser.test.ts --maxWorkers=1
+      - name: Build isolated real Gateway runtime
+        id: runtime
+        timeout-minutes: 20
+        continue-on-error: true
+        working-directory: upstream
+        env:
+          OPENCLAW_BUILD_PRIVATE_QA: '1'
+          OPENCLAW_RUN_NODE_SKIP_DTS_BUILD: '1'
+        run: python3 ../proof/proof/image-dimensions/run-check.py runtime -- pnpm build
+      - name: Real WebChat to mocked-provider boundary
+        id: boundary
+        if: steps.runtime.outcome == 'success'
+        timeout-minutes: 10
+        continue-on-error: true
+        working-directory: upstream
+        run: |
+          cp ../proof/proof/image-dimensions/model-boundary.e2e.test.ts extensions/qa-lab/src/control-ui-media-transcript.real-gateway.e2e.test.ts
+          python3 ../proof/proof/image-dimensions/run-check.py boundary -- node scripts/run-vitest.mjs run --config test/vitest/vitest.ui-e2e.config.ts --configLoader runner extensions/qa-lab/src/control-ui-media-transcript.real-gateway.e2e.test.ts --maxWorkers=1
+      - name: Exact outcomes
         if: always()
         env:
-          BASELINE: ${{ steps.baseline.outcome }}
-          BROWSER: ${{ steps.browser.outcome }}
-          LIFECYCLE: ${{ steps.lifecycle.outcome }}
-          TYPES: ${{ steps.types.outcome }}
-          LINT: ${{ steps.lint.outcome }}
-          FORMAT: ${{ steps.format.outcome }}
-          BUILD: ${{ steps.build.outcome }}
-          ALLOCATION: ${{ steps.allocation.outcome }}
+          OUTCOMES: ${{ toJSON(steps) }}
         run: |
-          printf 'Proof commit: %s\nBase: 19082a44a49109a0d93645b68caa0cb6a10b8837\n' "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
-          printf 'baseline=%s browser=%s lifecycle=%s types=%s lint=%s format=%s build=%s allocation=%s\n' "$BASELINE" "$BROWSER" "$LIFECYCLE" "$TYPES" "$LINT" "$FORMAT" "$BUILD" "$ALLOCATION" >> "$GITHUB_STEP_SUMMARY"
-          echo 'This is browser/payload proof, NOT real Gateway/model delivery.' >> "$GITHUB_STEP_SUMMARY"
-          echo "::notice title=Proof outcomes::baseline=$BASELINE browser=$BROWSER lifecycle=$LIFECYCLE types=$TYPES lint=$LINT format=$FORMAT build=$BUILD allocation=$ALLOCATION"
-          test "$BASELINE/$BROWSER/$LIFECYCLE/$TYPES/$LINT/$FORMAT/$BUILD/$ALLOCATION" = success/success/success/success/success/success/success/success
+          python3 - <<'PY'
+          import json, os
+          steps = json.loads(os.environ["OUTCOMES"])
+          wanted = ["formatting", "types", "lint", "format", "allocations", "maxlines", "unused", "browser", "memory", "runtime", "boundary"]
+          outcomes = {name: steps.get(name, {}).get("outcome", "missing") for name in wanted}
+          print("::notice title=Phase outcomes::" + json.dumps(outcomes))
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
+              out.write("Proof SHA: " + os.environ["GITHUB_SHA"] + "\n" + json.dumps(outcomes) + "\nMock provider, not live paid model. Memory is measured only on hosted Chromium.\n")
+          raise SystemExit(0 if all(value == "success" for value in outcomes.values()) else 1)
+          PY

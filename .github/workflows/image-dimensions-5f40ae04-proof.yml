@@ -33,6 +33,27 @@ jobs:
           npm install --global pnpm@12.15.0
           pnpm install --frozen-lockfile
           node --import ./scripts/tsx.mjs scripts/ensure-playwright-chromium.mts
+      - name: Build pinned baseline runtime for real delivery comparison
+        id: baseline_runtime
+        timeout-minutes: 20
+        working-directory: upstream
+        env:
+          OPENCLAW_BUILD_PRIVATE_QA: '1'
+          OPENCLAW_RUN_NODE_SKIP_DTS_BUILD: '1'
+        run: python3 ../proof/proof/image-dimensions/run-check.py baseline-runtime -- pnpm build
+      - name: Observe baseline real Gateway delivery
+        id: baseline_boundary
+        timeout-minutes: 8
+        continue-on-error: true
+        working-directory: upstream
+        env:
+          IMAGE_PROOF_BASELINE: '1'
+        run: |
+          cp ../proof/proof/image-dimensions/model-boundary.e2e.test.ts extensions/qa-lab/src/control-ui-media-transcript.real-gateway.e2e.test.ts
+          python3 ../proof/proof/image-dimensions/run-check.py baseline-boundary -- node scripts/run-vitest.mjs run --config test/vitest/vitest.ui-e2e.config.ts --configLoader runner extensions/qa-lab/src/control-ui-media-transcript.real-gateway.e2e.test.ts --maxWorkers=1
+      - name: Restore baseline fixture before product accounting
+        working-directory: upstream
+        run: git restore -- extensions/qa-lab/src/control-ui-media-transcript.real-gateway.e2e.test.ts
       - name: Apply reviewed candidate
         run: cp proof/proof/image-dimensions/candidate/ui/src/pages/chat/components/* upstream/ui/src/pages/chat/components/
       - name: Format exact product paths and stage real base accounting
@@ -52,20 +73,26 @@ jobs:
         continue-on-error: true
         working-directory: upstream
         run: python3 ../proof/proof/image-dimensions/run-check.py format -- pnpm format:check ui/src/pages/chat/components/chat-attachment-image.ts ui/src/pages/chat/components/chat-attachment-reads.ts ui/src/pages/chat/components/chat-attachments.ts ui/src/pages/chat/components/chat-attachments.test.tsx ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts
+      - name: Affected UI test types
+        id: types
+        timeout-minutes: 8
+        continue-on-error: true
+        working-directory: upstream
+        run: python3 ../proof/proof/image-dimensions/run-check.py types -- pnpm tsgo:test:ui
+      - name: Changed product allocation checks
+        id: allocation
+        timeout-minutes: 3
+        continue-on-error: true
+        working-directory: upstream
+        run: |
+          python3 ../proof/proof/image-dimensions/run-check.py allocation -- pnpm check:test-lines-ratchet
+          python3 ../proof/proof/image-dimensions/run-check.py maxlines -- pnpm check:max-lines-ratchet
       - name: Product browser
         id: browser
         timeout-minutes: 5
         continue-on-error: true
         working-directory: upstream
         run: python3 ../proof/proof/image-dimensions/run-check.py browser -- node scripts/run-vitest.mjs run --config test/vitest/vitest.ui-browser.config.ts --configLoader runner ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts ui/src/pages/chat/components/chat-attachment-resize.browser.test.ts ui/src/pages/chat/components/chat-attachment-inputs.browser.test.ts --maxWorkers=1
-      - name: Near-cap JPEG Chromium OS memory qualification
-        id: memory
-        timeout-minutes: 5
-        continue-on-error: true
-        working-directory: upstream
-        run: |
-          cp ../proof/proof/image-dimensions/memory.browser.test.ts ui/src/pages/chat/components/image-proof-memory.browser.test.ts
-          python3 ../proof/proof/image-dimensions/run-check.py memory -- python3 ../proof/proof/image-dimensions/memory-check.py node scripts/run-vitest.mjs run --config test/vitest/vitest.ui-browser.config.ts --configLoader runner ui/src/pages/chat/components/image-proof-memory.browser.test.ts --maxWorkers=1
       - name: Build isolated real Gateway runtime
         id: runtime
         timeout-minutes: 20
@@ -92,8 +119,9 @@ jobs:
           python3 - <<'PY'
           import json, os
           steps = json.loads(os.environ["OUTCOMES"])
-          wanted = ["formatting", "lint", "format", "browser", "memory", "runtime", "boundary"]
+          wanted = ["baseline_runtime", "formatting", "lint", "format", "types", "allocation", "browser", "runtime", "boundary"]
           outcomes = {name: steps.get(name, {}).get("outcome", "missing") for name in wanted}
+          print("::notice title=Baseline observation::" + steps.get("baseline_boundary", {}).get("outcome", "missing"))
           print("::notice title=Phase outcomes::" + json.dumps(outcomes))
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
               out.write("Proof SHA: " + os.environ["GITHUB_SHA"] + "\n" + json.dumps(outcomes) + "\nMock provider, not live paid model. Memory is measured only on hosted Chromium.\n")

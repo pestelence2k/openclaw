@@ -9,6 +9,7 @@ import { navigateToControlUiSession } from "../../../ui/src/test-helpers/control
 import { authenticateControlUi, startControlUiGateway, stopControlUiGateway } from "./control-ui-gateway.e2e.test-support.ts";
 import { createQaLiveLaneGateway } from "./live-transports/shared/live-gateway.runtime.ts";
 
+const baseline = process.env.IMAGE_PROOF_BASELINE === "1";
 const owner = createQaLiveLaneGateway();
 let gateway: Awaited<ReturnType<typeof startControlUiGateway>>;
 let proofDir: string;
@@ -45,7 +46,7 @@ suite.define(() => {
   it("delivers picker, data-url paste and file drop through real Gateway to mock provider", { timeout: 240000 }, async () => {
     await suite.withPage({ viewport: { width: 1280, height: 900 }, serviceWorkers: "block", locale: "en-US" }, async ({ page }) => {
       await authenticateControlUi(page, gateway.gateway);
-      for (const route of ["picker", "paste", "drop"] as const) {
+      for (const route of baseline ? ["picker"] as const : ["picker", "paste", "drop"] as const) {
         const sessionKey = "agent:qa:image-proof-" + route;
         console.log("IMAGE_PHASE " + route + " session-create");
         await gateway.gateway.call("sessions.create", { key: sessionKey, agentId: "qa", label: "Image proof " + route });
@@ -74,6 +75,7 @@ suite.define(() => {
         });
         const original = Buffer.from(dataUrl.split(",")[1], "base64");
         const originalSha = createHash("sha256").update(original).digest("hex");
+        console.log("IMAGE_FIXTURE " + JSON.stringify({ route, baseline, width: 8160, height: 4590, bytes: original.length, sha256: originalSha, recipe: "Chromium canvas solid #2468ac; JPEG quality 0.9" }));
         expect(original.length).toBeLessThan(6 * 1024 * 1024);
         await composer.fill("Reply exactly `IMAGE_PROOF_" + route.toUpperCase() + "_OK`");
         if (route === "picker") {
@@ -95,13 +97,25 @@ suite.define(() => {
         console.log("IMAGE_PHASE " + route + " prepared");
         await page.getByRole("button", { name: "Send message" }).click();
         const userImage = page.locator(".chat-group.user img.chat-message-image");
-        await expect.poll(() => userImage.first().evaluate((image) => image instanceof HTMLImageElement && image.complete ? image.naturalWidth : 0), { timeout: 30000 }).toBe(4096);
+        await expect.poll(() => userImage.first().evaluate((image) => image instanceof HTMLImageElement && image.complete ? image.naturalWidth : 0), { timeout: 30000 }).toBe(baseline ? 8160 : 4096);
         if (!gateway.mock) throw new Error("mock provider unavailable");
         const mockUrl = gateway.mock.baseUrl;
         const finalReply = "IMAGE_PROOF_" + route.toUpperCase() + "_OK";
-        await page.getByText(finalReply, { exact: true }).last().waitFor({ timeout: 90000 });
-        const requests = await (await fetch(mockUrl + "/debug/requests")).json() as Array<{ allInputText: string; imageInputCount: number; body: unknown }>;
-        const captured = requests.filter((request) => request.allInputText.includes(finalReply));
+        try {
+          await page.locator(".chat-group.assistant .chat-text", { hasText: finalReply }).last().waitFor({ timeout: 90000 });
+        } catch (error) {
+          const records = await (await fetch(mockUrl + "/debug/requests")).json() as Array<{ model: string; imageInputCount: number; allInputText: string }>;
+          console.log("IMAGE_PROVIDER_DIAGNOSTIC " + JSON.stringify({ baseline, route, requests: records.map((record) => ({ model: record.model, imageInputs: record.imageInputCount, markerMatched: record.allInputText.includes(finalReply) })) }));
+          throw error;
+        }
+        console.log("IMAGE_PHASE " + route + " assistant-reply");
+        const readCaptured = async () => {
+          const requests = await (await fetch(mockUrl + "/debug/requests")).json() as Array<{ allInputText: string; imageInputCount: number; body: unknown }>;
+          return requests.filter((request) => request.allInputText.includes(finalReply));
+        };
+        await expect.poll(async () => (await readCaptured()).length, { timeout: 15000 }).toBe(1);
+        const captured = await readCaptured();
+        console.log("IMAGE_PROVIDER " + JSON.stringify({ baseline, route, matchingRequests: captured.length, imageInputs: captured.map((request) => request.imageInputCount) }));
         expect(captured).toHaveLength(1);
         expect(captured[0].imageInputCount).toBe(1);
         const urls = imageUrls(captured[0].body);
@@ -124,7 +138,7 @@ suite.define(() => {
         expect(pixels.bytes).toBeLessThanOrEqual(6 * 1024 * 1024);
         for (const [index, expected] of [36, 104, 172].entries()) expect(Math.abs(pixels.color[index] - expected)).toBeLessThan(6);
         expect(createHash("sha256").update(original).digest("hex")).toBe(originalSha);
-        console.log("IMAGE_BOUNDARY " + JSON.stringify({ route, originalSha, originalBytes: original.length, preparedWidth: 4096, provider: pixels, imageInputs: 1, finalReply, mockedProvider: true }));
+        console.log("IMAGE_BOUNDARY " + JSON.stringify({ route, originalSha, originalBytes: original.length, preparedWidth: baseline ? 8160 : 4096, provider: pixels, imageInputs: 1, finalReply, mockedProvider: true }));
       }
     });
   });

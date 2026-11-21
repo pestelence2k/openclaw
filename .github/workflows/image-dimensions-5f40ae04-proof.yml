@@ -1,0 +1,119 @@
+# Task-owned secretless experimental proof; no PR publication.
+name: Image Dimensions 5f40ae04 Proof
+on:
+  push:
+    branches: [proof/image-dimensions-5f40ae04-20261121]
+permissions:
+  contents: read
+env:
+  NO_COLOR: '1'
+jobs:
+  focused-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          path: proof
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: openclaw/openclaw
+          ref: 19082a44a49109a0d93645b68caa0cb6a10b8837
+          path: upstream
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.22.1'
+      - name: Install isolated dependencies
+        timeout-minutes: 15
+        working-directory: upstream
+        run: |
+          npm install --global pnpm@12.15.0
+          pnpm install --frozen-lockfile
+          node --import ./scripts/tsx.mjs scripts/ensure-playwright-chromium.mts
+      - name: Overlay only the regression on the pinned base
+        run: cp proof/proof/image-dimensions/candidate/ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts upstream/ui/src/pages/chat/components/
+      - name: Baseline regression
+        timeout-minutes: 5
+        id: baseline
+        continue-on-error: true
+        working-directory: upstream
+        run: |
+          set +e
+          node scripts/run-vitest.mjs run --config test/vitest/vitest.ui-browser.config.ts --configLoader runner ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts --maxWorkers=1 -t 'prepares a below-byte-limit' > ../baseline.log 2>&1
+          result=$?
+          cat ../baseline.log
+          if [ "$result" -eq 0 ]; then
+            echo "::error::Baseline unexpectedly passed"
+            exit 1
+          fi
+          if ! grep -Eq 'expected 8160 to be 4096' ../baseline.log; then
+            echo "::error::Baseline did not establish the expected dimension failure"
+            exit 1
+          fi
+          echo 'Baseline: expected high-pixel dimension failure observed; inspect assertion in log.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Apply reviewed candidate
+        run: cp proof/proof/image-dimensions/candidate/ui/src/pages/chat/components/* upstream/ui/src/pages/chat/components/
+      - name: Candidate browser proof
+        id: browser
+        timeout-minutes: 8
+        continue-on-error: true
+        working-directory: upstream
+        run: node scripts/run-vitest.mjs run --config test/vitest/vitest.ui-browser.config.ts --configLoader runner ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts ui/src/pages/chat/components/chat-attachment-resize.browser.test.ts ui/src/pages/chat/components/chat-attachment-inputs.browser.test.ts --maxWorkers=1
+      - name: Candidate lifecycle proof
+        id: lifecycle
+        timeout-minutes: 8
+        continue-on-error: true
+        working-directory: upstream
+        run: pnpm test ui/src/pages/chat/components/chat-attachments.test.tsx --maxWorkers=1
+      - name: Typecheck
+        id: types
+        timeout-minutes: 8
+        continue-on-error: true
+        working-directory: upstream
+        run: pnpm tsgo:ui
+      - name: Targeted lint
+        id: lint
+        timeout-minutes: 8
+        continue-on-error: true
+        working-directory: upstream
+        run: node scripts/run-oxlint.mjs --tsconfig tsconfig.ui.json ui/src/pages/chat/components/chat-attachment-image.ts ui/src/pages/chat/components/chat-attachment-reads.ts ui/src/pages/chat/components/chat-attachments.ts ui/src/pages/chat/components/chat-attachments.test.tsx ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts
+      - name: Targeted format
+        id: format
+        timeout-minutes: 8
+        continue-on-error: true
+        working-directory: upstream
+        run: pnpm format:check ui/src/pages/chat/components/chat-attachment-image.ts ui/src/pages/chat/components/chat-attachment-reads.ts ui/src/pages/chat/components/chat-attachments.ts ui/src/pages/chat/components/chat-attachments.test.tsx ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts
+      - name: Production UI build
+        id: build
+        timeout-minutes: 15
+        continue-on-error: true
+        working-directory: upstream
+        run: pnpm ui:build
+      - name: Required allocation and unused-file checks
+        id: allocation
+        timeout-minutes: 8
+        continue-on-error: true
+        working-directory: upstream
+        run: |
+          pnpm check:test-lines-ratchet
+          pnpm check:max-lines-ratchet
+          pnpm deadcode:unused-files
+      - name: Summarize exact proof outcomes
+        if: always()
+        env:
+          BASELINE: ${{ steps.baseline.outcome }}
+          BROWSER: ${{ steps.browser.outcome }}
+          LIFECYCLE: ${{ steps.lifecycle.outcome }}
+          TYPES: ${{ steps.types.outcome }}
+          LINT: ${{ steps.lint.outcome }}
+          FORMAT: ${{ steps.format.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+          ALLOCATION: ${{ steps.allocation.outcome }}
+        run: |
+          printf 'Proof commit: %s\nBase: 19082a44a49109a0d93645b68caa0cb6a10b8837\n' "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          printf 'baseline=%s browser=%s lifecycle=%s types=%s lint=%s format=%s build=%s allocation=%s\n' "$BASELINE" "$BROWSER" "$LIFECYCLE" "$TYPES" "$LINT" "$FORMAT" "$BUILD" "$ALLOCATION" >> "$GITHUB_STEP_SUMMARY"
+          echo 'This is browser/payload proof, NOT real Gateway/model delivery.' >> "$GITHUB_STEP_SUMMARY"
+          test "$BASELINE/$BROWSER/$LIFECYCLE/$TYPES/$LINT/$FORMAT/$BUILD/$ALLOCATION" = success/success/success/success/success/success/success/success

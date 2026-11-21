@@ -42,7 +42,7 @@ jobs:
         working-directory: upstream
         run: |
           set +e
-          node scripts/run-vitest.mjs run --config test/vitest/vitest.ui-browser.config.ts --configLoader runner ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts --maxWorkers=1 -t 'prepares a below-byte-limit' > ../baseline.log 2>&1
+          node scripts/run-vitest.mjs run --config test/vitest/vitest.ui-browser.config.ts --configLoader runner ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts --maxWorkers=1 -t 'prepares a below-byte-limit 37 MP JPEG via file' > ../baseline.log 2>&1
           result=$?
           cat ../baseline.log
           if [ "$result" -eq 0 ]; then
@@ -53,6 +53,7 @@ jobs:
             echo "::error::Baseline did not establish the expected dimension failure"
             exit 1
           fi
+          echo '::notice title=Proof baseline::Expected 8160 versus 4096 assertion observed on pinned base.'
           echo 'Baseline: expected high-pixel dimension failure observed; inspect assertion in log.' >> "$GITHUB_STEP_SUMMARY"
       - name: Apply reviewed candidate
         run: cp proof/proof/image-dimensions/candidate/ui/src/pages/chat/components/* upstream/ui/src/pages/chat/components/
@@ -61,46 +62,46 @@ jobs:
         timeout-minutes: 8
         continue-on-error: true
         working-directory: upstream
-        run: node scripts/run-vitest.mjs run --config test/vitest/vitest.ui-browser.config.ts --configLoader runner ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts ui/src/pages/chat/components/chat-attachment-resize.browser.test.ts ui/src/pages/chat/components/chat-attachment-inputs.browser.test.ts --maxWorkers=1
+        run: python3 ../proof/proof/image-dimensions/run-check.py browser -- node scripts/run-vitest.mjs run --config test/vitest/vitest.ui-browser.config.ts --configLoader runner ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts ui/src/pages/chat/components/chat-attachment-resize.browser.test.ts ui/src/pages/chat/components/chat-attachment-inputs.browser.test.ts --maxWorkers=1
       - name: Candidate lifecycle proof
         id: lifecycle
         timeout-minutes: 8
         continue-on-error: true
         working-directory: upstream
-        run: pnpm test ui/src/pages/chat/components/chat-attachments.test.tsx --maxWorkers=1
+        run: python3 ../proof/proof/image-dimensions/run-check.py lifecycle -- pnpm test ui/src/pages/chat/components/chat-attachments.test.tsx --maxWorkers=1
       - name: Typecheck
         id: types
         timeout-minutes: 8
         continue-on-error: true
         working-directory: upstream
-        run: pnpm tsgo:ui
+        run: python3 ../proof/proof/image-dimensions/run-check.py types -- pnpm tsgo:ui
       - name: Targeted lint
         id: lint
         timeout-minutes: 8
         continue-on-error: true
         working-directory: upstream
-        run: node scripts/run-oxlint.mjs --tsconfig tsconfig.ui.json ui/src/pages/chat/components/chat-attachment-image.ts ui/src/pages/chat/components/chat-attachment-reads.ts ui/src/pages/chat/components/chat-attachments.ts ui/src/pages/chat/components/chat-attachments.test.tsx ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts
+        run: python3 ../proof/proof/image-dimensions/run-check.py lint -- node scripts/run-oxlint.mjs --tsconfig tsconfig.ui.json ui/src/pages/chat/components/chat-attachment-image.ts ui/src/pages/chat/components/chat-attachment-reads.ts ui/src/pages/chat/components/chat-attachments.ts ui/src/pages/chat/components/chat-attachments.test.tsx ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts
       - name: Targeted format
         id: format
         timeout-minutes: 8
         continue-on-error: true
         working-directory: upstream
-        run: pnpm format:check ui/src/pages/chat/components/chat-attachment-image.ts ui/src/pages/chat/components/chat-attachment-reads.ts ui/src/pages/chat/components/chat-attachments.ts ui/src/pages/chat/components/chat-attachments.test.tsx ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts
+        run: python3 ../proof/proof/image-dimensions/run-check.py format -- pnpm format:check ui/src/pages/chat/components/chat-attachment-image.ts ui/src/pages/chat/components/chat-attachment-reads.ts ui/src/pages/chat/components/chat-attachments.ts ui/src/pages/chat/components/chat-attachments.test.tsx ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts
       - name: Production UI build
         id: build
         timeout-minutes: 15
         continue-on-error: true
         working-directory: upstream
-        run: pnpm ui:build
+        run: python3 ../proof/proof/image-dimensions/run-check.py build -- pnpm ui:build
       - name: Required allocation and unused-file checks
         id: allocation
         timeout-minutes: 8
         continue-on-error: true
         working-directory: upstream
         run: |
-          pnpm check:test-lines-ratchet
-          pnpm check:max-lines-ratchet
-          pnpm deadcode:unused-files
+          python3 ../proof/proof/image-dimensions/run-check.py allocations -- pnpm check:test-lines-ratchet
+          python3 ../proof/proof/image-dimensions/run-check.py max-lines -- pnpm check:max-lines-ratchet
+          python3 ../proof/proof/image-dimensions/run-check.py unused-files -- pnpm deadcode:unused-files
       - name: Summarize exact proof outcomes
         if: always()
         env:
@@ -116,4 +117,5 @@ jobs:
           printf 'Proof commit: %s\nBase: 19082a44a49109a0d93645b68caa0cb6a10b8837\n' "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
           printf 'baseline=%s browser=%s lifecycle=%s types=%s lint=%s format=%s build=%s allocation=%s\n' "$BASELINE" "$BROWSER" "$LIFECYCLE" "$TYPES" "$LINT" "$FORMAT" "$BUILD" "$ALLOCATION" >> "$GITHUB_STEP_SUMMARY"
           echo 'This is browser/payload proof, NOT real Gateway/model delivery.' >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Proof outcomes::baseline=$BASELINE browser=$BROWSER lifecycle=$LIFECYCLE types=$TYPES lint=$LINT format=$FORMAT build=$BUILD allocation=$ALLOCATION"
           test "$BASELINE/$BROWSER/$LIFECYCLE/$TYPES/$LINT/$FORMAT/$BUILD/$ALLOCATION" = success/success/success/success/success/success/success/success

@@ -33,27 +33,15 @@ jobs:
           npm install --global pnpm@12.15.0
           pnpm install --frozen-lockfile
           node --import ./scripts/tsx.mjs scripts/ensure-playwright-chromium.mts
-      - name: Build pinned baseline runtime for real delivery comparison
-        id: baseline_runtime
-        timeout-minutes: 20
-        working-directory: upstream
-        env:
-          OPENCLAW_BUILD_PRIVATE_QA: '1'
-          OPENCLAW_RUN_NODE_SKIP_DTS_BUILD: '1'
-        run: python3 ../proof/proof/image-dimensions/run-check.py baseline-runtime -- pnpm build
-      - name: Observe baseline real Gateway delivery
-        id: baseline_boundary
-        timeout-minutes: 8
+      - name: Reproduce reviewed APNG rejection
+        id: regression_before
+        timeout-minutes: 5
         continue-on-error: true
         working-directory: upstream
-        env:
-          IMAGE_PROOF_BASELINE: '1'
         run: |
-          cp ../proof/proof/image-dimensions/model-boundary.e2e.test.ts extensions/qa-lab/src/control-ui-media-transcript.real-gateway.e2e.test.ts
-          python3 ../proof/proof/image-dimensions/run-check.py baseline-boundary -- node scripts/run-vitest.mjs run --config test/vitest/vitest.ui-e2e.config.ts --configLoader runner extensions/qa-lab/src/control-ui-media-transcript.real-gateway.e2e.test.ts --maxWorkers=1
-      - name: Restore baseline fixture before product accounting
-        working-directory: upstream
-        run: git restore -- extensions/qa-lab/src/control-ui-media-transcript.real-gateway.e2e.test.ts
+          cp ../proof/proof/image-dimensions/candidate/ui/src/pages/chat/components/* ui/src/pages/chat/components/
+          cp ../proof/proof/image-dimensions/apng-baseline-image.ts ui/src/pages/chat/components/chat-attachment-image.ts
+          python3 ../proof/proof/image-dimensions/run-check.py regression-before -- node scripts/run-vitest.mjs run --config test/vitest/vitest.ui-browser.config.ts --configLoader runner ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts --maxWorkers=1 -t 'preserves byte-valid 5000x1000 APNG'
       - name: Apply reviewed candidate
         run: cp proof/proof/image-dimensions/candidate/ui/src/pages/chat/components/* upstream/ui/src/pages/chat/components/
       - name: Format exact product paths and stage real base accounting
@@ -93,24 +81,6 @@ jobs:
         continue-on-error: true
         working-directory: upstream
         run: python3 ../proof/proof/image-dimensions/run-check.py browser -- node scripts/run-vitest.mjs run --config test/vitest/vitest.ui-browser.config.ts --configLoader runner ui/src/pages/chat/components/chat-attachment-dimensions.browser.test.ts ui/src/pages/chat/components/chat-attachment-resize.browser.test.ts ui/src/pages/chat/components/chat-attachment-inputs.browser.test.ts --maxWorkers=1
-      - name: Build isolated real Gateway runtime
-        id: runtime
-        timeout-minutes: 20
-        continue-on-error: true
-        working-directory: upstream
-        env:
-          OPENCLAW_BUILD_PRIVATE_QA: '1'
-          OPENCLAW_RUN_NODE_SKIP_DTS_BUILD: '1'
-        run: python3 ../proof/proof/image-dimensions/run-check.py runtime -- pnpm build
-      - name: Real WebChat to mocked-provider boundary
-        id: boundary
-        if: steps.runtime.outcome == 'success'
-        timeout-minutes: 10
-        continue-on-error: true
-        working-directory: upstream
-        run: |
-          cp ../proof/proof/image-dimensions/model-boundary.e2e.test.ts extensions/qa-lab/src/control-ui-media-transcript.real-gateway.e2e.test.ts
-          python3 ../proof/proof/image-dimensions/run-check.py boundary -- node scripts/run-vitest.mjs run --config test/vitest/vitest.ui-e2e.config.ts --configLoader runner extensions/qa-lab/src/control-ui-media-transcript.real-gateway.e2e.test.ts --maxWorkers=1
       - name: Exact outcomes
         if: always()
         env:
@@ -119,11 +89,11 @@ jobs:
           python3 - <<'PY'
           import json, os
           steps = json.loads(os.environ["OUTCOMES"])
-          wanted = ["baseline_runtime", "formatting", "lint", "format", "types", "allocation", "browser", "runtime", "boundary"]
+          wanted = ["formatting", "lint", "format", "types", "allocation", "browser"]
           outcomes = {name: steps.get(name, {}).get("outcome", "missing") for name in wanted}
-          print("::notice title=Baseline observation::" + steps.get("baseline_boundary", {}).get("outcome", "missing"))
+          print("::notice title=APNG regression before::" + steps.get("regression_before", {}).get("outcome", "missing"))
           print("::notice title=Phase outcomes::" + json.dumps(outcomes))
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
-              out.write("Proof SHA: " + os.environ["GITHUB_SHA"] + "\n" + json.dumps(outcomes) + "\nMock provider, not live paid model. Memory is measured only on hosted Chromium.\n")
-          raise SystemExit(0 if all(value == "success" for value in outcomes.values()) else 1)
+              out.write("Proof SHA: " + os.environ["GITHUB_SHA"] + "\n" + json.dumps(outcomes) + "\nTargeted APNG regression only; prior Gateway and memory evidence retained, not rerun.\n")
+          raise SystemExit(0 if all(value == "success" for value in outcomes.values()) and steps.get("regression_before", {}).get("outcome") == "failure" else 1)
           PY
